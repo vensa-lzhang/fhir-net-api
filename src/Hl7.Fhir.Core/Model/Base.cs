@@ -60,7 +60,7 @@ namespace Hl7.Fhir.Model
 
             if (dest != null)
             {
-                if (UserData != null) dest.UserData = new Dictionary<string,object>(UserData);
+                if (UserData != null) dest.UserData = new Dictionary<string, object>(UserData);
                 if (FhirComments != null) dest.FhirComments = new List<string>(FhirComments);
                 return dest;
             }
@@ -78,6 +78,7 @@ namespace Hl7.Fhir.Model
         private Dictionary<string, object> _userData = new Dictionary<string, object>();
 
         [NotMapped]
+        [DataMember]
         public Dictionary<string, object> UserData
         {
             get { return _userData; }
