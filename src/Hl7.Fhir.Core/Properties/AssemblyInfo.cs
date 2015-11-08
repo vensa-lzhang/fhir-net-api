@@ -22,7 +22,7 @@ using System.Runtime.InteropServices;
 #endif
 
 #if RELEASE
-[assembly:AssemblyKeyFileAttribute("..\\FhirNetApi.snk")]
+//[assembly:AssemblyKeyFileAttribute("..\\FhirNetApi.snk")]
 #endif
 
 [assembly: CLSCompliant(true)]
