@@ -43,7 +43,9 @@ namespace Hl7.Fhir.Model
 {
     [InvokeIValidatableObject]
     [System.Runtime.Serialization.DataContract]
-    public abstract class Base : Hl7.Fhir.Validation.IValidatableObject, IDeepCopyable, IDeepComparable
+    //Every FHIR entity needs to derive from MarshalByRefObject in order to be accessed from plugins
+    //loaded in other app domains
+    public abstract class Base : MarshalByRefObject, Hl7.Fhir.Validation.IValidatableObject, IDeepCopyable, IDeepComparable
     {
         public abstract bool IsExactly(IDeepComparable other);
         public abstract bool Matches(IDeepComparable pattern);
