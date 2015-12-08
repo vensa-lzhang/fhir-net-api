@@ -113,7 +113,7 @@ namespace Hl7.Fhir.Rest
         }
 
 
-        private bool _returnFullResource = false;
+        //private bool _returnFullResource = false;
 
         /// <summary>
         /// Should calls to Create, Update and transaction operations return the whole updated content?
@@ -123,11 +123,10 @@ namespace Hl7.Fhir.Rest
         {
             get 
             {
-                return _returnFullResource;
+                return _requester.Prefer == Prefer.ReturnRepresentation;
             }
             set 
             {
-                _returnFullResource = value;
                 _requester.Prefer = value==true ? Prefer.ReturnRepresentation : Prefer.ReturnMinimal; 
             }
         }
@@ -478,58 +477,58 @@ namespace Hl7.Fhir.Rest
         }
 
 
-        public Resource WholeSystemOperation(string operationName, Parameters parameters = null)
+        public Resource WholeSystemOperation(string operationName, Parameters parameters = null, bool useGet = false)
         {
             if (operationName == null) throw Error.ArgumentNull("operationName");
-            return internalOperation(operationName, parameters: parameters);
+            return internalOperation(operationName, parameters: parameters, useGet: useGet);
         }
 
-        public Resource TypeOperation<TResource>(string operationName, Parameters parameters = null) where TResource : Resource
+        public Resource TypeOperation<TResource>(string operationName, Parameters parameters = null, bool useGet = false) where TResource : Resource
         {
             if (operationName == null) throw Error.ArgumentNull("operationName");
 
             var typeName = ModelInfo.GetResourceNameForType(typeof(TResource));
-            return TypeOperation(operationName, typeName, parameters);
+            return TypeOperation(operationName, typeName, parameters, useGet: useGet);
         }
 
-        public Resource TypeOperation(string operationName, string typeName, Parameters parameters = null)
+        public Resource TypeOperation(string operationName, string typeName, Parameters parameters = null, bool useGet = false)
         {
             if (operationName == null) throw Error.ArgumentNull("operationName");
             if (typeName == null) throw Error.ArgumentNull("typeName");
 
-            return internalOperation(operationName, typeName, parameters: parameters);
+            return internalOperation(operationName, typeName, parameters: parameters, useGet: useGet);
         }
 
-        public Resource InstanceOperation(Uri location, string operationName, Parameters parameters = null)
+        public Resource InstanceOperation(Uri location, string operationName, Parameters parameters = null, bool useGet = false)
         {
             if (location == null) throw Error.ArgumentNull("location");
             if (operationName == null) throw Error.ArgumentNull("operationName");
 
             var id = verifyResourceIdentity(location, needId: true, needVid: false);
 
-            return internalOperation(operationName, id.ResourceType, id.Id, id.VersionId, parameters);
+            return internalOperation(operationName, id.ResourceType, id.Id, id.VersionId, parameters, useGet);
         }
 
-        public Resource Operation(Uri location, string operationName, Parameters parameters = null)
+        public Resource Operation(Uri location, string operationName, Parameters parameters = null, bool useGet = false)
         {
             if (location == null) throw Error.ArgumentNull("location");
             if (operationName == null) throw Error.ArgumentNull("operationName");
 
-            var tx = new TransactionBuilder(Endpoint).EndpointOperation(new RestUrl(location), operationName, parameters).ToBundle();
+            var tx = new TransactionBuilder(Endpoint).EndpointOperation(new RestUrl(location), operationName, parameters, useGet).ToBundle();
 
             return execute<Resource>(tx, HttpStatusCode.OK);
         }
 
-        public Resource Operation(Uri operation, Parameters parameters = null)
+        public Resource Operation(Uri operation, Parameters parameters = null, bool useGet = false)
         {
             if (operation == null) throw Error.ArgumentNull("operation");
 
-            var tx = new TransactionBuilder(Endpoint).EndpointOperation(new RestUrl(operation), parameters).ToBundle();
+            var tx = new TransactionBuilder(Endpoint).EndpointOperation(new RestUrl(operation), parameters, useGet).ToBundle();
 
             return execute<Resource>(tx, HttpStatusCode.OK);
         }
 
-        private Resource internalOperation(string operationName, string type = null, string id = null, string vid = null, Parameters parameters = null)
+        private Resource internalOperation(string operationName, string type = null, string id = null, string vid = null, Parameters parameters = null, bool useGet = false)
         {
             // Brian: Not sure why we would create this parameters object as empty.
             //        I would imagine that a null parameters object is different to an empty one?
@@ -538,11 +537,11 @@ namespace Hl7.Fhir.Rest
             Bundle tx;
 
             if (type == null)
-                tx = new TransactionBuilder(Endpoint).ServerOperation(operationName, parameters).ToBundle();
+                tx = new TransactionBuilder(Endpoint).ServerOperation(operationName, parameters, useGet).ToBundle();
             else if (id == null)
-                tx = new TransactionBuilder(Endpoint).TypeOperation(type, operationName, parameters).ToBundle();
+                tx = new TransactionBuilder(Endpoint).TypeOperation(type, operationName, parameters, useGet).ToBundle();
             else
-                tx = new TransactionBuilder(Endpoint).ResourceOperation(type, id, vid, operationName, parameters).ToBundle();
+                tx = new TransactionBuilder(Endpoint).ResourceOperation(type, id, vid, operationName, parameters, useGet).ToBundle();
 
             return execute<Resource>(tx, HttpStatusCode.OK);
         }
@@ -805,25 +804,44 @@ namespace Hl7.Fhir.Rest
             verifyServerVersion();
 
             var request = tx.Entry[0];
-            var response = _requester.Execute(request, typeof(TResource));
+            var response = _requester.Execute(request);
 
             if (!expect.Select(sc => ((int)sc).ToString()).Contains(response.Response.Status))
             {
                 HttpStatusCode code;
                 Enum.TryParse<HttpStatusCode>(response.Response.Status, out code);
-                throw new FhirOperationException("Operation concluded succesfully, but the return status {0} was unexpected".FormatWith(response.Response.Status), code);
+                throw new FhirOperationException("Operation concluded successfully, but the return status {0} was unexpected".FormatWith(response.Response.Status), code);
             }
 
+            Resource result;
+
             // Special feature: if ReturnFullResource was requested (using the Prefer header), but the server did not return the resource
-            // explicitly go out to the server to get the resource and return it. This behaviour is only valid for PUT and POST requests,
-            // where the server may device whether or not to return the full body of the alterend resource.
-            if (response.Resource == null && isPostOrPut(request) && ReturnFullResource)
+            // (or it returned an OperationOutcome) - explicitly go out to the server to get the resource and return it. 
+            // This behavior is only valid for PUT and POST requests, where the server may device whether or not to return the full body of the alterend resource.
+            var noRealBody = response.Resource == null || response.Resource is OperationOutcome;
+            if (noRealBody && isPostOrPut(request) && ReturnFullResource && response.Response.Location != null)
             {
-                if (response.Response.Location == null) throw Error.InvalidOperation("Server did not return a Location header nor a body: no way to retrieve the created/updated resource");
-                return (TResource)Get(response.Response.Location);
+                result = Get(response.Response.Location);
             }
             else
-                return (TResource)response.Resource;
+                result = response.Resource;
+
+            if (result == null) return null;
+            
+            // We have a success code (2xx), we have a body, but the body may not be of the type we expect.
+            if (!(result is TResource))
+            {
+                // If this is an operationoutcome, that may still be allright. Keep the OperationOutcome in 
+                // the LastResult, and return null as the result. Otherwise, throw.
+                if (result is OperationOutcome)
+                    return null;
+
+                var message = String.Format("Operation {0} on {1} expected a body of type {2} but a {3} was returned", response.Request.Method,
+                    response.Request.Url, typeof(TResource).Name, result.GetType().Name);
+                throw new FhirOperationException(message, _requester.LastResponse.StatusCode);
+            }
+            else
+                return result as TResource;
         }
 
         private bool isPostOrPut(Bundle.BundleEntryComponent interaction)
