@@ -32,9 +32,11 @@ namespace Hl7.Fhir.Tests.Rest
         //Uri testEndpoint = new Uri("http://spark-dstu2.furore.com/fhir");
         // Uri testEndpoint = new Uri("http://localhost.fiddler:1396/fhir");
         // Uri testEndpoint = new Uri("http://localhost:1396/fhir");
-         //  Uri testEndpoint = new Uri("http://fhir2.healthintersections.com.au/open");
+        Uri testEndpoint = new Uri("http://fhir2.healthintersections.com.au/open");
         // Uri testEndpoint = new Uri("https://api.fhir.me");
-        Uri testEndpoint = new Uri("http://fhirtest.uhn.ca/baseDstu2");
+        // Uri testEndpoint = new Uri("http://fhirtest.uhn.ca/baseDstu2");
+        //Uri testEndpoint = new Uri("http://localhost:49911/fhir");
+        // Uri testEndpoint = new Uri("http://sqlonfhir-dstu2.azurewebsites.net/fhir");
 
         [TestInitialize]
         public void TestInitialize()
@@ -299,11 +301,12 @@ namespace Hl7.Fhir.Tests.Rest
         }
 
 
-        [TestMethod]
+        [TestMethod, Ignore]
         public void StackOverflow()
         {
+            // Test doesn't assert anything, nor have a pre defined set of data
             var client = new FhirClient("http://spark.furore.com/fhir");
-            var pat = client.Read<Patient>("Patient/1");
+            var pat = client.Read<Patient>("Patient/1"); // "/_history/spark680");
         }
 
         [TestMethod, TestCategory("FhirClient")]
@@ -313,6 +316,7 @@ namespace Hl7.Fhir.Tests.Rest
             client.ReturnFullResource = true;       // which is also the default
 
             var pat = client.Read<Patient>("Patient/example");
+            ResourceIdentity ri = pat.ResourceIdentity().WithBase(client.Endpoint);
             pat.Id = null;
             pat.Identifier.Clear();
             var patC = client.Create<Patient>(pat);
@@ -328,6 +332,14 @@ namespace Hl7.Fhir.Tests.Rest
                 var returned = client.LastBodyAsResource;
                 Assert.IsTrue(returned is OperationOutcome);
             }
+
+            // Now validate this resource
+            client.ReturnFullResource = true;       // which is also the default
+            Parameters p = new Parameters();
+          //  p.Add("mode", new FhirString("create"));
+            p.Add("resource", pat);
+            OperationOutcome ooI = (OperationOutcome)client.InstanceOperation(ri.WithoutVersion(), "validate", p);
+            Assert.IsNotNull(ooI);
         }
 
 
@@ -348,7 +360,7 @@ namespace Hl7.Fhir.Tests.Rest
             pat.Identifier.Clear();
             pat.Identifier.Add(new Identifier("http://hl7.org/test/2", "99999"));
 
-            var fe = client.Create(pat);
+            var fe = client.Create(pat); // Create as we are not providing the ID to be used.
             Assert.IsNotNull(fe);
             Assert.IsNotNull(fe.Id);
             Assert.IsNotNull(fe.Meta.VersionId);
@@ -379,6 +391,27 @@ namespace Hl7.Fhir.Tests.Rest
             {
                 Assert.IsTrue(client.LastResult.Status == "410");
             }
+        }
+
+        [TestMethod, TestCategory("FhirClient")]
+        //Test for github issue https://github.com/ewoutkramer/fhir-net-api/issues/145
+        public void Create_ObservationWithValueAsSimpleQuantity_ReadReturnsValueAsQuantity()
+        {
+            FhirClient client = new FhirClient(testEndpoint);
+            var observation = new Observation();
+            observation.Status = Observation.ObservationStatus.Preliminary;
+            observation.Code = new CodeableConcept("http://loinc.org", "2164-2");
+            observation.Value = new SimpleQuantity()
+            {
+                System = "http://unitsofmeasure.org",
+                Value = 23,
+                Code = "mg",
+                Unit = "miligram"
+            };
+            observation.BodySite = new CodeableConcept("http://snomed.info/sct", "182756003");
+            var fe = client.Create(observation);
+            fe = client.Read<Observation>(fe.ResourceIdentity().WithoutVersion());
+            Assert.IsInstanceOfType(fe.Value, typeof(Quantity));
         }
 
 #if PORTABLE45z
@@ -454,7 +487,7 @@ namespace Hl7.Fhir.Tests.Rest
             Bundle history = client.History(createdTestPatientUrl);
             Assert.IsNotNull(history);
             Assert.AreEqual(4, history.Entry.Count());
-            Assert.AreEqual(3, history.Entry.Where(entry => entry.Resource != null).Count());
+            Assert.AreEqual(3, history.Entry.Where(entry => entry.Resource != null).Count());            
             Assert.AreEqual(1, history.Entry.Where(entry => entry.IsDeleted()).Count());
 
             //// Now, assume no one is quick enough to insert something between now and the next
@@ -486,17 +519,17 @@ namespace Hl7.Fhir.Tests.Rest
         [TestMethod, TestCategory("FhirClient")]
         public void ManipulateMeta()
         {
-            FhirClient client = new FhirClient(testEndpoint);
+           FhirClient client = new FhirClient(testEndpoint);
 
             var pat = new Patient();
             pat.Meta = new Meta();
-            var key = new Random().Next();
+           var key = new Random().Next();
             pat.Meta.ProfileElement.Add(new FhirUri("http://someserver.org/fhir/StructureDefinition/XYZ1-" + key));
             pat.Meta.Security.Add(new Coding("http://mysystem.com/sec", "1234-" + key));
             pat.Meta.Tag.Add(new Coding("http://mysystem.com/tag", "sometag1-" + key));
 
-            //Before we begin, ensure that our new tags are not actually used when doing System Meta()
-            var wsm = client.Meta();
+          //Before we begin, ensure that our new tags are not actually used when doing System Meta()
+          var wsm = client.Meta();
             Assert.IsNotNull(wsm);
 
             Assert.IsFalse(wsm.Profile.Contains("http://someserver.org/fhir/StructureDefinition/XYZ1-" + key));
@@ -508,71 +541,71 @@ namespace Hl7.Fhir.Tests.Rest
             Assert.IsFalse(wsm.Tag.Select(c => c.Code + "@" + c.System).Contains("sometag2-" + key + "@http://mysystem.com/tag"));
 
 
-            // First, create a patient with the first set of meta
-            var pat2 = client.Create(pat);
-            var loc = pat2.ResourceIdentity(testEndpoint);
+          // First, create a patient with the first set of meta
+          var pat2 = client.Create(pat);
+          var loc = pat2.ResourceIdentity(testEndpoint);          
 
-            // Meta should be present on created patient
+          // Meta should be present on created patient
             verifyMeta(pat2.Meta, false, key);
 
-            // Should be present when doing instance Meta()
-            var par = client.Meta(loc);
+          // Should be present when doing instance Meta()
+          var par = client.Meta(loc);
             verifyMeta(par, false, key);
 
-            // Should be present when doing type Meta()
-            par = client.Meta(ResourceType.Patient);
+          // Should be present when doing type Meta()
+          par = client.Meta(ResourceType.Patient);
             verifyMeta(par, false, key);
 
-            // Should be present when doing System Meta()
-            par = client.Meta();
+          // Should be present when doing System Meta()
+          par = client.Meta();
             verifyMeta(par, false, key);
 
-            // Now add some additional meta to the patient
+          // Now add some additional meta to the patient
 
-            var newMeta = new Meta();
+          var newMeta = new Meta();
             newMeta.ProfileElement.Add(new FhirUri("http://someserver.org/fhir/StructureDefinition/XYZ2-" + key));
-            newMeta.Security.Add(new Coding("http://mysystem.com/sec", "5678-" + key));
-            newMeta.Tag.Add(new Coding("http://mysystem.com/tag", "sometag2-" + key));
+          newMeta.Security.Add(new Coding("http://mysystem.com/sec", "5678-" + key));
+          newMeta.Tag.Add(new Coding("http://mysystem.com/tag", "sometag2-" + key));       
 
+          
+          client.AddMeta(loc, newMeta);
+          var pat3 = client.Read<Patient>(loc);
 
-            client.AddMeta(loc, newMeta);
-            var pat3 = client.Read<Patient>(loc);
+          // New and old meta should be present on instance
+          verifyMeta(pat3.Meta, true, key);
 
-            // New and old meta should be present on instance
-            verifyMeta(pat3.Meta, true, key);
-
-            // New and old meta should be present on Meta()
-            par = client.Meta(loc);
+          // New and old meta should be present on Meta()
+          par = client.Meta(loc);
             verifyMeta(par, true, key);
 
-            // New and old meta should be present when doing type Meta()
-            par = client.Meta(ResourceType.Patient);
+          // New and old meta should be present when doing type Meta()
+          par = client.Meta(ResourceType.Patient);
             verifyMeta(par, true, key);
 
-            // New and old meta should be present when doing system Meta()
-            par = client.Meta();
+          // New and old meta should be present when doing system Meta()
+          par = client.Meta();
             verifyMeta(par, true, key);
 
-            // Now, remove those new meta tags
-            client.DeleteMeta(loc, newMeta);
+          // Now, remove those new meta tags
+          client.DeleteMeta(loc, newMeta);
 
-            // Should no longer be present on instance
-            var pat4 = client.Read<Patient>(loc);
-            verifyMeta(pat4.Meta, false, key);
+          // Should no longer be present on instance
+          var pat4 = client.Read<Patient>(loc);
+          verifyMeta(pat4.Meta, false, key);
 
-            // Should no longer be present when doing instance Meta()
-            par = client.Meta(loc);
+          // Should no longer be present when doing instance Meta()
+          par = client.Meta(loc);
             verifyMeta(par, false, key);
 
-            // Should no longer be present when doing type Meta()
-            par = client.Meta(ResourceType.Patient);
+          // Should no longer be present when doing type Meta()
+          par = client.Meta(ResourceType.Patient);
             verifyMeta(par, false, key);
 
-            // clear out the client that we created, no point keeping it around
-            client.Delete(pat4);
+          // clear out the client that we created, no point keeping it around
+          client.Delete(pat4);
 
-            // Should no longer be present when doing System Meta()
-            par = client.Meta();
+          // Should no longer be present when doing System Meta()
+          par = client.Meta();
             verifyMeta(par, false, key);
         }
 
@@ -620,9 +653,9 @@ namespace Hl7.Fhir.Tests.Rest
             {
                 Name = "Furore",
                 Identifier = new List<Identifier> { new Identifier("http://hl7.org/test/1", "3141") },
-                Telecom = new List<ContactPoint> {
+                Telecom = new List<ContactPoint> { 
                     new ContactPoint { System = ContactPoint.ContactPointSystem.Phone, Value = "+31-20-3467171", Use = ContactPoint.ContactPointUse.Work },
-                    new ContactPoint { System = ContactPoint.ContactPointSystem.Fax, Value = "+31-20-3467172" }
+                    new ContactPoint { System = ContactPoint.ContactPointSystem.Fax, Value = "+31-20-3467172" } 
                 }
             };
 
@@ -677,15 +710,18 @@ namespace Hl7.Fhir.Tests.Rest
         [TestMethod]
         public void TestBinaryDetection()
         {
-            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary"));
-            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary?param=x"));
-            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary/_history"));
+            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary", null));
+            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary?param=x", null));
+            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary/_history", null));
 
-            Assert.IsTrue(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary/2"));
-            Assert.IsTrue(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary/2/_history/1"));
+            Assert.IsTrue(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary/2", null));
+            Assert.IsTrue(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary/2/_history/1", null));
 
-            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/ValueSet/extensional-case-1/$expand?filter=f"));
-            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/ValueSet/extensional-case-1/$expand%3Ffilter=f"));
+            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary/2", "application/xml+fhir"));
+            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/Binary/2/_history/1", "application/json+fhir"));
+
+            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/ValueSet/extensional-case-1/$expand?filter=f", null));
+            Assert.IsFalse(HttpToEntryExtensions.IsBinaryResponse("http://server.org/fhir/ValueSet/extensional-case-1/$expand%3Ffilter=f", null));
         }
 
         [TestMethod]
@@ -780,7 +816,7 @@ namespace Hl7.Fhir.Tests.Rest
 
 
             client = new FhirClient(testEndpointDSTU12);
-
+                       
             try
             {
                 p = client.Conformance();
