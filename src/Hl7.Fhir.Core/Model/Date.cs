@@ -43,7 +43,7 @@ namespace Hl7.Fhir.Model
     {
         public static Date Today()
         {
-            return new Date(DateTime.Now.ToString("yyyy-MM-dd"));
+            return new Date(DateTime.UtcNow.ToString("yyyy-MM-dd"));
         }
 
         public static bool IsValidValue(string value)
