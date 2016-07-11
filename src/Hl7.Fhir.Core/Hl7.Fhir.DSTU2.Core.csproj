@@ -46,7 +46,7 @@
     <DocumentationFile>bin\Release\Net45\Hl7.Fhir.DSTU2.Core.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup>
-    <SignAssembly>true</SignAssembly>
+    <SignAssembly>false</SignAssembly>
   </PropertyGroup>
   <PropertyGroup>
     <AssemblyOriginatorKeyFile>Vensa.External.pfx</AssemblyOriginatorKeyFile>
